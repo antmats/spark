@@ -82,6 +82,7 @@ class Strategy @Since("1.3.0") (
     @Since("1.2.0") @BeanProperty var useNodeIdCache: Boolean = false,
     @Since("1.2.0") @BeanProperty var checkpointInterval: Int = 10,
     @Since("3.0.0") @BeanProperty var minWeightFractionPerNode: Double = 0.0,
+    @BeanProperty private[spark] var alpha: Double = 0.0,
     @BeanProperty private[spark] var bootstrap: Boolean = false) extends Serializable {
 
   /**

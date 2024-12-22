@@ -71,6 +71,9 @@ from pyspark.ml.tree import (
     _GBTParams,
     _HasVarianceImpurity,
     _TreeClassifierParams,
+    HasMissingnessCol,
+    HasAlpha,
+    HasMissingnessRelianceCol,
 )
 from pyspark.ml.regression import _FactorizationMachinesParams, DecisionTreeRegressionModel
 from pyspark.ml.base import _PredictorParams
@@ -1689,6 +1692,9 @@ class _DecisionTreeClassifierParams(_DecisionTreeParams, _TreeClassifierParams):
 class DecisionTreeClassifier(
     _JavaProbabilisticClassifier["DecisionTreeClassificationModel"],
     _DecisionTreeClassifierParams,
+    HasMissingnessCol,
+    HasAlpha,
+    HasMissingnessRelianceCol,
     JavaMLWritable,
     JavaMLReadable["DecisionTreeClassifier"],
 ):
@@ -1795,13 +1801,17 @@ class DecisionTreeClassifier(
         weightCol: Optional[str] = None,
         leafCol: str = "",
         minWeightFractionPerNode: float = 0.0,
+        missingnessCol: Optional[str] = None,
+        alpha: float = 0.0,
+        missingnessRelianceCol: Optional[str] = None,
     ):
         """
         __init__(self, \\*, featuresCol="features", labelCol="label", predictionCol="prediction", \
                  probabilityCol="probability", rawPredictionCol="rawPrediction", \
                  maxDepth=5, maxBins=32, minInstancesPerNode=1, minInfoGain=0.0, \
                  maxMemoryInMB=256, cacheNodeIds=False, checkpointInterval=10, impurity="gini", \
-                 seed=None, weightCol=None, leafCol="", minWeightFractionPerNode=0.0)
+                 seed=None, weightCol=None, leafCol="", minWeightFractionPerNode=0.0, missingnessCol=None, \
+                 alpha=0.0, missingnessRelianceCol=None)
         """
         super(DecisionTreeClassifier, self).__init__()
         self._java_obj = self._new_java_obj(
@@ -1832,13 +1842,17 @@ class DecisionTreeClassifier(
         weightCol: Optional[str] = None,
         leafCol: str = "",
         minWeightFractionPerNode: float = 0.0,
+        missingnessCol: Optional[str] = None,
+        alpha: float = 0.0,
+        missingnessRelianceCol: Optional[str] = None,
     ) -> "DecisionTreeClassifier":
         """
         setParams(self, \\*, featuresCol="features", labelCol="label", predictionCol="prediction", \
                   probabilityCol="probability", rawPredictionCol="rawPrediction", \
                   maxDepth=5, maxBins=32, minInstancesPerNode=1, minInfoGain=0.0, \
                   maxMemoryInMB=256, cacheNodeIds=False, checkpointInterval=10, impurity="gini", \
-                  seed=None, weightCol=None, leafCol="", minWeightFractionPerNode=0.0)
+                  seed=None, weightCol=None, leafCol="", minWeightFractionPerNode=0.0, missingnessCol=None, \
+                  alpha=0.0, missingnessRelianceCol=None)
         Sets params for the DecisionTreeClassifier.
         """
         kwargs = self._input_kwargs
@@ -1923,6 +1937,8 @@ class DecisionTreeClassificationModel(
     _DecisionTreeModel,
     _JavaProbabilisticClassificationModel[Vector],
     _DecisionTreeClassifierParams,
+    HasMissingnessCol,
+    HasMissingnessRelianceCol,
     JavaMLWritable,
     JavaMLReadable["DecisionTreeClassificationModel"],
 ):

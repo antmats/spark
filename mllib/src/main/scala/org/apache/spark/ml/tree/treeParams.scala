@@ -33,6 +33,53 @@ import org.apache.spark.mllib.tree.impurity.{Entropy => OldEntropy, Gini => OldG
 import org.apache.spark.mllib.tree.loss.{AbsoluteError => OldAbsoluteError, ClassificationLoss => OldClassificationLoss, LogLoss => OldLogLoss, Loss => OldLoss, SquaredError => OldSquaredError}
 import org.apache.spark.sql.types.{DataType, DoubleType, StructType}
 
+trait HasMissingnessCol extends Params {
+
+  /**
+   * Param for missingness column name. If this is not set or empty, we assume that no instances have missing values.
+   * @group param
+   */
+  final val missingnessCol: Param[String] = new Param[String](this, "missingnessCol", "missingness column name. If this is not set or empty, we assume that no instances have missing values")
+
+  /** @group getParam */
+  final def getMissingnessCol: String = $(missingnessCol)
+
+  /** @group setParam */
+  def setMissingnessCol(value: String): this.type = set(missingnessCol, value)
+}
+
+trait HasMissingnessRelianceCol extends Params {
+
+  /**
+   * Param for missingness reliance column name.
+   * @group param
+   */
+  final val missingnessRelianceCol: Param[String] = new Param[String](this, "missingnessRelianceCol", "missingness reliance column name")
+
+  /** @group getParam */
+  final def getMissingnessRelianceCol: String = $(missingnessRelianceCol)
+
+  /** @group setParam */
+  def setMissingnessRelianceCol(value: String): this.type = set(missingnessRelianceCol, value)
+}
+
+trait HasAlpha extends Params {
+
+  /**
+   * Param for missingness reliance regularization parameter (>= 0).
+   * @group param
+   */
+  final val alpha: DoubleParam = new DoubleParam(this, "alpha", "missingness reliance regularization parameter (>= 0)", ParamValidators.gtEq(0))
+
+  setDefault(alpha, 0.0)
+
+  /** @group getParam */
+  final def getAlpha: Double = $(alpha)
+
+  /** @group setParam */
+  def setAlpha(value: Double): this.type = set(alpha, value)
+}
+
 /**
  * Parameters for Decision Tree-based algorithms.
  *

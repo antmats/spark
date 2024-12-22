@@ -61,7 +61,8 @@ private[spark] class DTStatsAggregator(
    * Offset for each feature for calculating indices into the [[allStats]] array.
    */
   private val featureOffsets: Array[Int] = {
-    numBins.scanLeft(0)((total, nBins) => total + statsSize * nBins)
+    // Increase the size by 1 to account for the (weighted) number of samples with missing values.
+    numBins.scanLeft(0)((total, nBins) => total + statsSize * nBins + 1)
   }
 
   /**
@@ -72,7 +73,7 @@ private[spark] class DTStatsAggregator(
   /**
    * Flat array of elements.
    * Index for start of stats for a (feature, bin) is:
-   *   index = featureOffsets(featureIndex) + binIndex * statsSize
+   *   index = featureOffsets(featureIndex) + binIndex * statsSize + 1
    */
   private val allStats: Array[Double] = new Array[Double](allStatsSize)
 
@@ -91,7 +92,15 @@ private[spark] class DTStatsAggregator(
    *                           from [[getFeatureOffset]].
    */
   def getImpurityCalculator(featureOffset: Int, binIndex: Int): ImpurityCalculator = {
-    impurityAggregator.getCalculator(allStats, featureOffset + binIndex * statsSize)
+    impurityAggregator.getCalculator(allStats, featureOffset + binIndex * statsSize + 1)
+  }
+
+  /**
+   * Get the fraction of missing values for a given feature.
+   */
+  def getMissingnessFraction(featureOffset: Int): Double = {
+    val count = getParentImpurityCalculator().count
+    allStats(featureOffset) / count
   }
 
   /**
@@ -110,7 +119,7 @@ private[spark] class DTStatsAggregator(
       label: Double,
       numSamples: Int,
       sampleWeight: Double): Unit = {
-    val i = featureOffsets(featureIndex) + binIndex * statsSize
+    val i = featureOffsets(featureIndex) + binIndex * statsSize + 1
     impurityAggregator.update(allStats, i, label, numSamples, sampleWeight)
   }
 
@@ -134,8 +143,20 @@ private[spark] class DTStatsAggregator(
       label: Double,
       numSamples: Int,
       sampleWeight: Double): Unit = {
-    impurityAggregator.update(allStats, featureOffset + binIndex * statsSize,
+    impurityAggregator.update(allStats, featureOffset + binIndex * statsSize + 1,
       label, numSamples, sampleWeight)
+  }
+
+  /**
+   * Update the missing value stats for a given feature.
+   */
+  def updateMissingness(
+      featureIndex: Int,
+      missingnessIndicator: Double,
+      numSamples: Int,
+      sampleWeight: Double): Unit = {
+    val featureOffset = featureOffsets(featureIndex)
+    allStats(featureOffset) += missingnessIndicator * numSamples * sampleWeight
   }
 
   /**
@@ -153,8 +174,8 @@ private[spark] class DTStatsAggregator(
    * @param otherBinIndex  This bin is not modified.
    */
   def mergeForFeature(featureOffset: Int, binIndex: Int, otherBinIndex: Int): Unit = {
-    impurityAggregator.merge(allStats, featureOffset + binIndex * statsSize,
-      featureOffset + otherBinIndex * statsSize)
+    impurityAggregator.merge(allStats, featureOffset + binIndex * statsSize + 1,
+      featureOffset + otherBinIndex * statsSize + 1)
   }
 
   /**

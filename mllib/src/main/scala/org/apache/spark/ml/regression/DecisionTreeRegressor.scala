@@ -22,7 +22,7 @@ import org.json4s.{DefaultFormats, JObject}
 import org.json4s.JsonDSL._
 
 import org.apache.spark.annotation.Since
-import org.apache.spark.ml.feature.Instance
+import org.apache.spark.ml.feature.MissingnessInstance
 import org.apache.spark.ml.linalg.Vector
 import org.apache.spark.ml.param.ParamMap
 import org.apache.spark.ml.tree._
@@ -45,7 +45,7 @@ import org.apache.spark.sql.types.StructType
 @Since("1.4.0")
 class DecisionTreeRegressor @Since("1.4.0") (@Since("1.4.0") override val uid: String)
   extends Regressor[Vector, DecisionTreeRegressor, DecisionTreeRegressionModel]
-  with DecisionTreeRegressorParams with DefaultParamsWritable {
+  with DecisionTreeRegressorParams with DefaultParamsWritable with HasMissingnessCol with HasAlpha with HasMissingnessRelianceCol {
 
   @Since("1.4.0")
   def this() = this(Identifiable.randomUID("dtr"))
@@ -117,14 +117,18 @@ class DecisionTreeRegressor @Since("1.4.0") (@Since("1.4.0") override val uid: S
     val categoricalFeatures: Map[Int, Int] =
       MetadataUtils.getCategoricalFeatures(dataset.schema($(featuresCol)))
 
+    val numFeatures = getNumFeatures(dataset, $(featuresCol))
+
     val instances = dataset.select(
       checkRegressionLabels($(labelCol)),
       checkNonNegativeWeights(get(weightCol)),
-      checkNonNanVectors($(featuresCol))
-    ).rdd.map { case Row(l: Double, w: Double, v: Vector) => Instance(l, w, v)
+      checkNonNanVectors($(featuresCol)),
+      checkMissingnessVectors(get(missingnessCol), numFeatures)
+    ).rdd.map { case Row(l: Double, w: Double, v: Vector, m: Vector) => MissingnessInstance(l, w, v, m)
     }.setName("training instances")
 
     val strategy = getOldStrategy(categoricalFeatures)
+    strategy.alpha = $(alpha)
     require(!strategy.bootstrap, "DecisionTreeRegressor does not need bootstrap sampling")
 
     instr.logPipelineStage(this)
@@ -169,7 +173,7 @@ class DecisionTreeRegressionModel private[ml] (
     override val rootNode: Node,
     override val numFeatures: Int)
   extends RegressionModel[Vector, DecisionTreeRegressionModel]
-  with DecisionTreeModel with DecisionTreeRegressorParams with MLWritable with Serializable {
+  with DecisionTreeModel with DecisionTreeRegressorParams with HasMissingnessCol with HasMissingnessRelianceCol with MLWritable with Serializable {
 
   /** @group setParam */
   def setVarianceCol(value: String): this.type = set(varianceCol, value)
@@ -189,6 +193,10 @@ class DecisionTreeRegressionModel private[ml] (
     rootNode.predictImpl(features).prediction
   }
 
+  def computeMissingnessReliance(features: Vector, missingness: Vector): Double = {
+    rootNode.computeMissingnessRelianceImpl(features, missingness)
+  }
+
   /** We need to update this function if we ever add other impurity measures. */
   protected def predictVariance(features: Vector): Double = {
     rootNode.predictImpl(features).impurityStats.calculate()
@@ -202,6 +210,9 @@ class DecisionTreeRegressionModel private[ml] (
     }
     if ($(leafCol).nonEmpty) {
       outputSchema = SchemaUtils.updateField(outputSchema, getLeafField($(leafCol)))
+    }
+    if ($(missingnessRelianceCol).nonEmpty) {
+      outputSchema = SchemaUtils.updateField(outputSchema, getMissingnessRelianceField($(missingnessRelianceCol)))
     }
     outputSchema
   }
@@ -232,6 +243,15 @@ class DecisionTreeRegressionModel private[ml] (
       predictionColNames :+= $(leafCol)
       predictionColumns :+= leafUDF(col($(featuresCol)))
         .as($(leafCol), outputSchema($(leafCol)).metadata)
+    }
+
+    if ($(missingnessRelianceCol).nonEmpty && $(missingnessCol).nonEmpty) {
+      val missingnessUDF = udf { (features: Vector, missingness: Vector) =>
+        computeMissingnessReliance(features, missingness)
+      }
+      predictionColNames :+= $(missingnessRelianceCol)
+      predictionColumns :+= missingnessUDF(col($(featuresCol)), col($(missingnessCol)))
+        .as($(missingnessRelianceCol), outputSchema($(missingnessRelianceCol)).metadata)
     }
 
     if (predictionColNames.nonEmpty) {

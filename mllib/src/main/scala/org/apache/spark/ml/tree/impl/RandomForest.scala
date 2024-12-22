@@ -23,7 +23,7 @@ import scala.util.Random
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.internal.Logging
 import org.apache.spark.ml.classification.DecisionTreeClassificationModel
-import org.apache.spark.ml.feature.Instance
+import org.apache.spark.ml.feature.MissingnessInstance
 import org.apache.spark.ml.impl.Utils
 import org.apache.spark.ml.regression.DecisionTreeRegressionModel
 import org.apache.spark.ml.tree._
@@ -95,7 +95,7 @@ private[spark] object RandomForest extends Logging with Serializable {
       featureSubsetStrategy: String,
       seed: Long): Array[DecisionTreeModel] = {
     val instances = input.map { case LabeledPoint(label, features) =>
-      Instance(label, 1.0, features.asML)
+      MissingnessInstance(label, 1.0, features.asML)
     }
     run(instances, strategy, numTrees, featureSubsetStrategy, seed, None)
   }
@@ -255,11 +255,11 @@ private[spark] object RandomForest extends Logging with Serializable {
   /**
    * Train a random forest.
    *
-   * @param input Training data: RDD of `Instance`
+   * @param input Training data: RDD of `MissingnessInstance`
    * @return an unweighted set of trees
    */
   def run(
-      input: RDD[Instance],
+      input: RDD[MissingnessInstance],
       strategy: OldStrategy,
       numTrees: Int,
       featureSubsetStrategy: String,
@@ -271,10 +271,10 @@ private[spark] object RandomForest extends Logging with Serializable {
 
     timer.start("build metadata")
     val metadata = DecisionTreeMetadata
-      .buildMetadata(input.retag(classOf[Instance]), strategy, numTrees, featureSubsetStrategy)
+      .buildMetadata(input.retag(classOf[MissingnessInstance]), strategy, numTrees, featureSubsetStrategy)
     timer.stop("build metadata")
 
-    val retaggedInput = input.retag(classOf[Instance])
+    val retaggedInput = input.retag(classOf[MissingnessInstance])
 
     // Find the splits and the corresponding bins (interval between the splits) using a sample
     // of the input data.
@@ -397,6 +397,7 @@ private[spark] object RandomForest extends Logging with Serializable {
         val binIndex = treePoint.binnedFeatures(featureIndex)
         agg.update(featureIndexIdx, binIndex, treePoint.label, numSamples, sampleWeight)
       }
+      agg.updateMissingness(featureIndexIdx, treePoint.missingness(featureIndex), numSamples, sampleWeight)
       featureIndexIdx += 1
     }
   }
@@ -425,8 +426,10 @@ private[spark] object RandomForest extends Logging with Serializable {
       // Use subsampled features
       var featureIndexIdx = 0
       while (featureIndexIdx < featuresForNode.get.length) {
-        val binIndex = treePoint.binnedFeatures(featuresForNode.get.apply(featureIndexIdx))
+        val featureIndex = featuresForNode.get.apply(featureIndexIdx)
+        val binIndex = treePoint.binnedFeatures(featureIndex)
         agg.update(featureIndexIdx, binIndex, label, numSamples, sampleWeight)
+        agg.updateMissingness(featureIndexIdx, treePoint.missingness(featureIndex), numSamples, sampleWeight)
         featureIndexIdx += 1
       }
     } else {
@@ -436,6 +439,7 @@ private[spark] object RandomForest extends Logging with Serializable {
       while (featureIndex < numFeatures) {
         val binIndex = treePoint.binnedFeatures(featureIndex)
         agg.update(featureIndex, binIndex, label, numSamples, sampleWeight)
+        agg.updateMissingness(featureIndex, treePoint.missingness(featureIndex), numSamples, sampleWeight)
         featureIndex += 1
       }
     }
@@ -749,13 +753,15 @@ private[spark] object RandomForest extends Logging with Serializable {
    * @param leftImpurityCalculator left node aggregates for this (feature, split)
    * @param rightImpurityCalculator right node aggregate for this (feature, split)
    * @param metadata learning and dataset metadata for DecisionTree
+   * @param missingness the fraction of missing values for this feature
    * @return Impurity statistics for this (feature, split)
    */
   private def calculateImpurityStats(
       stats: ImpurityStats,
       leftImpurityCalculator: ImpurityCalculator,
       rightImpurityCalculator: ImpurityCalculator,
-      metadata: DecisionTreeMetadata): ImpurityStats = {
+      metadata: DecisionTreeMetadata,
+      missingness: Double): ImpurityStats = {
 
     val parentImpurityCalculator: ImpurityCalculator = if (stats == null) {
       leftImpurityCalculator.copy.add(rightImpurityCalculator)
@@ -800,7 +806,9 @@ private[spark] object RandomForest extends Logging with Serializable {
       return ImpurityStats.getInvalidImpurityStats(parentImpurityCalculator)
     }
 
-    new ImpurityStats(gain, impurity, parentImpurityCalculator,
+    val regularizedGain = gain - metadata.alpha * missingness
+
+    new ImpurityStats(regularizedGain, impurity, parentImpurityCalculator,
       leftImpurityCalculator, rightImpurityCalculator)
   }
 
@@ -846,6 +854,15 @@ private[spark] object RandomForest extends Logging with Serializable {
             binAggregates.mergeForFeature(nodeFeatureOffset, splitIndex + 1, splitIndex)
             splitIndex += 1
           }
+          // Compute the (weighted) fraction of samples with missing values for this feature.
+          // We use binAggregates.getParentImpurityCalculator().count to get the total (weighted)
+          // number of samples for this node. Since the bin statistics has been aggregated,
+          // this can also be obtained from the bin statistics of the last bin.
+          // TODO: Remove this assert when it is confirmed that the code is correct.
+          val a = binAggregates.getParentImpurityCalculator().count
+          val b = binAggregates.getImpurityCalculator(nodeFeatureOffset, numSplits).count
+          assert(math.abs(a - b) <= 1e-9, s"Number of samples are not equal: $a and $b.")
+          val missingnessFraction = binAggregates.getMissingnessFraction(nodeFeatureOffset)
           // Find best split.
           val (bestFeatureSplitIndex, bestFeatureGainStats) =
             Range(0, numSplits).map { splitIdx =>
@@ -855,20 +872,21 @@ private[spark] object RandomForest extends Logging with Serializable {
                 binAggregates.getImpurityCalculator(nodeFeatureOffset, numSplits)
               rightChildStats.subtract(leftChildStats)
               gainAndImpurityStats = calculateImpurityStats(gainAndImpurityStats,
-                leftChildStats, rightChildStats, binAggregates.metadata)
+                leftChildStats, rightChildStats, binAggregates.metadata, missingnessFraction)
               (splitIdx, gainAndImpurityStats)
             }.maxBy(_._2.gain)
           (splits(featureIndex)(bestFeatureSplitIndex), bestFeatureGainStats)
         } else if (binAggregates.metadata.isUnordered(featureIndex)) {
           // Unordered categorical feature
           val leftChildOffset = binAggregates.getFeatureOffset(featureIndexIdx)
+          val missingnessFraction = binAggregates.getMissingnessFraction(leftChildOffset)
           val (bestFeatureSplitIndex, bestFeatureGainStats) =
             Range(0, numSplits).map { splitIndex =>
               val leftChildStats = binAggregates.getImpurityCalculator(leftChildOffset, splitIndex)
               val rightChildStats = binAggregates.getParentImpurityCalculator()
                 .subtract(leftChildStats)
               gainAndImpurityStats = calculateImpurityStats(gainAndImpurityStats,
-                leftChildStats, rightChildStats, binAggregates.metadata)
+                leftChildStats, rightChildStats, binAggregates.metadata, missingnessFraction)
               (splitIndex, gainAndImpurityStats)
             }.maxBy(_._2.gain)
           (splits(featureIndex)(bestFeatureSplitIndex), bestFeatureGainStats)
@@ -876,6 +894,8 @@ private[spark] object RandomForest extends Logging with Serializable {
           // Ordered categorical feature
           val nodeFeatureOffset = binAggregates.getFeatureOffset(featureIndexIdx)
           val numCategories = binAggregates.metadata.numBins(featureIndex)
+
+          val missingnessFraction = binAggregates.getMissingnessFraction(nodeFeatureOffset)
 
           /* Each bin is one category (feature value).
            * The bins are ordered based on centroidForCategories, and this ordering determines which
@@ -940,7 +960,7 @@ private[spark] object RandomForest extends Logging with Serializable {
                 binAggregates.getImpurityCalculator(nodeFeatureOffset, lastCategory)
               rightChildStats.subtract(leftChildStats)
               gainAndImpurityStats = calculateImpurityStats(gainAndImpurityStats,
-                leftChildStats, rightChildStats, binAggregates.metadata)
+                leftChildStats, rightChildStats, binAggregates.metadata, missingnessFraction)
               (splitIndex, gainAndImpurityStats)
             }.maxBy(_._2.gain)
           val categoriesForSplit =
@@ -993,14 +1013,14 @@ private[spark] object RandomForest extends Logging with Serializable {
    *       and for multiclass classification with a high-arity feature,
    *       there is one bin per category.
    *
-   * @param input Training data: RDD of [[Instance]]
+   * @param input Training data: RDD of [[MissingnessInstance]]
    * @param metadata Learning and dataset metadata
    * @param seed random seed
    * @return Splits, an Array of [[Split]]
    *          of size (numFeatures, numSplits)
    */
   protected[tree] def findSplits(
-      input: RDD[Instance],
+      input: RDD[MissingnessInstance],
       metadata: DecisionTreeMetadata,
       seed: Long): Array[Array[Split]] = {
 
@@ -1019,14 +1039,14 @@ private[spark] object RandomForest extends Logging with Serializable {
         input
       }
     } else {
-      input.sparkContext.emptyRDD[Instance]
+      input.sparkContext.emptyRDD[MissingnessInstance]
     }
 
     findSplitsBySorting(sampledInput, metadata, continuousFeatures)
   }
 
   private def findSplitsBySorting(
-      input: RDD[Instance],
+      input: RDD[MissingnessInstance],
       metadata: DecisionTreeMetadata,
       continuousFeatures: IndexedSeq[Int]): Array[Array[Split]] = {
 

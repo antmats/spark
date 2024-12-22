@@ -153,7 +153,7 @@ class RandomForestClassifier @Since("1.4.0") (
       checkClassificationLabels($(labelCol), Some(numClasses)),
       checkNonNegativeWeights(get(weightCol)),
       checkNonNanVectors($(featuresCol))
-    ).rdd.map { case Row(l: Double, w: Double, v: Vector) => Instance(l, w, v)
+    ).rdd.map { case Row(l: Double, w: Double, v: Vector) => MissingnessInstance(l, w, v)
     }.setName("training instances")
 
     val strategy =

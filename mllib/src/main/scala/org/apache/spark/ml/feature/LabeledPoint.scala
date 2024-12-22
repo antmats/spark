@@ -38,12 +38,12 @@ case class LabeledPoint(@Since("2.0.0") label: Double, @Since("2.0.0") features:
     s"($label,$features)"
   }
 
-  private[spark] def toInstance(weight: Double): Instance = {
-    Instance(label, weight, features)
+  private[spark] def toInstance(weight: Double): MissingnessInstance = {
+    MissingnessInstance(label, weight, features)
   }
 
-  private[spark] def toInstance: Instance = {
-    Instance(label, 1.0, features)
+  private[spark] def toInstance: MissingnessInstance = {
+    MissingnessInstance(label, 1.0, features)
   }
 
 }

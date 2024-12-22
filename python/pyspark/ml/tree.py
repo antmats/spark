@@ -38,6 +38,91 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 
+class HasMissingnessCol(Params):
+    """
+    Mixin for param missingnessCol: missingness column name. If this is not set or empty, we assume that no instances have missing values.
+    """
+
+    missingnessCol: "Param[str]" = Param(
+        Params._dummy(),
+        "missingnessCol",
+        "missingness column name. If this is not set or empty, we assume that no instances have missing values.",
+        typeConverter=TypeConverters.toString,
+    )
+
+    def __init__(self) -> None:
+        super(HasMissingnessCol, self).__init__()
+
+    def getMissingnessCol(self) -> str:
+        """
+        Gets the value of missingnessCol or its default value.
+        """
+        return self.getOrDefault(self.missingnessCol)
+
+    def setMissingnessCol(self, value: str) -> "DecisionTreeClassifier":
+        """
+        Sets the value of :py:attr:`missingnessCol`.
+        """
+        return self._set(missingnessCol=value)
+
+
+class HasAlpha(Params):
+    """
+    Mixin for param alpha: missingness reliance regularization parameter (>= 0).
+    """
+
+    alpha: "Param[float]" = Param(
+        Params._dummy(),
+        "alpha",
+        "missingness reliance regularization parameter (>= 0).",
+        typeConverter=TypeConverters.toFloat,
+    )
+
+    def __init__(self) -> None:
+        super(HasAlpha, self).__init__()
+        self._setDefault(alpha=0.0)
+
+    def getAlpha(self) -> float:
+        """
+        Gets the value of alpha or its default value.
+        """
+        return self.getOrDefault(self.alpha)
+
+    def setAlpha(self, value: float) -> "DecisionTreeClassifier":
+        """
+        Sets the value of :py:attr:`alpha`.
+        """
+        return self._set(alpha=value)
+
+
+class HasMissingnessRelianceCol(Params):
+    """
+    Mixin for param missingnessRelianceCol: missingness reliance column name.
+    """
+
+    missingnessRelianceCol: "Param[str]" = Param(
+        Params._dummy(),
+        "missingnessRelianceCol",
+        "missingness reliance column name.",
+        typeConverter=TypeConverters.toString,
+    )
+
+    def __init__(self) -> None:
+        super(HasMissingnessRelianceCol, self).__init__()
+
+    def getMissingnessRelianceCol(self) -> str:
+        """
+        Gets the value of missingnessRelianceCol or its default value.
+        """
+        return self.getOrDefault(self.missingnessRelianceCol)
+
+    def setMissingnessRelianceCol(self, value: str) -> "DecisionTreeClassifier":
+        """
+        Sets the value of :py:attr:`missingnessRelianceCol`.
+        """
+        return self._set(missingnessRelianceCol=value)
+
+
 @inherit_doc
 class _DecisionTreeModel(JavaPredictionModel[T]):
     """

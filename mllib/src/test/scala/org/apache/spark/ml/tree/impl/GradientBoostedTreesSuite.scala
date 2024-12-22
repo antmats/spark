@@ -18,7 +18,7 @@
 package org.apache.spark.ml.tree.impl
 
 import org.apache.spark.SparkFunSuite
-import org.apache.spark.ml.feature.Instance
+import org.apache.spark.ml.feature.MissingnessInstance
 import org.apache.spark.mllib.tree.{GradientBoostedTreesSuite => OldGBTSuite}
 import org.apache.spark.mllib.tree.configuration.{BoostingStrategy, Strategy}
 import org.apache.spark.mllib.tree.configuration.Algo._
@@ -54,7 +54,7 @@ class GradientBoostedTreesSuite extends SparkFunSuite with MLlibTestSparkContext
       val (trees, treeWeights) = GradientBoostedTrees.run(trainRdd, boostingStrategy, seed, "all")
       val (errorWithoutValidation, errorWithValidation) = {
         if (algo == Classification) {
-          val remappedRdd = validateRdd.map(x => Instance(2 * x.label - 1, x.weight, x.features))
+          val remappedRdd = validateRdd.map(x => MissingnessInstance(2 * x.label - 1, x.weight, x.features, x.missingness))
           (GradientBoostedTrees.computeWeightedError(remappedRdd, trees, treeWeights, loss),
             GradientBoostedTrees.computeWeightedError(remappedRdd, validateTrees,
               validateTreeWeights, loss))

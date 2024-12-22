@@ -48,7 +48,7 @@ import org.apache.spark.sql.types.StructType
 class DecisionTreeClassifier @Since("1.4.0") (
     @Since("1.4.0") override val uid: String)
   extends ProbabilisticClassifier[Vector, DecisionTreeClassifier, DecisionTreeClassificationModel]
-  with DecisionTreeClassifierParams with DefaultParamsWritable {
+  with DecisionTreeClassifierParams with DefaultParamsWritable with HasMissingnessCol with HasAlpha with HasMissingnessRelianceCol {
 
   @Since("1.4.0")
   def this() = this(Identifiable.randomUID("dtc"))
@@ -125,14 +125,18 @@ class DecisionTreeClassifier @Since("1.4.0") (
         s" numClasses=$numClasses, but thresholds has length ${$(thresholds).length}")
     }
 
+    val numFeatures = getNumFeatures(dataset, $(featuresCol))
+
     val instances = dataset.select(
       checkClassificationLabels($(labelCol), Some(numClasses)),
       checkNonNegativeWeights(get(weightCol)),
-      checkNonNanVectors($(featuresCol))
-    ).rdd.map { case Row(l: Double, w: Double, v: Vector) => Instance(l, w, v)
+      checkNonNanVectors($(featuresCol)),
+      checkMissingnessVectors(get(missingnessCol), numFeatures)
+    ).rdd.map { case Row(l: Double, w: Double, v: Vector, m: Vector) => MissingnessInstance(l, w, v, m)
     }.setName("training instances")
 
     val strategy = getOldStrategy(categoricalFeatures, numClasses)
+    strategy.alpha = $(alpha)
     require(!strategy.bootstrap, "DecisionTreeClassifier does not need bootstrap sampling")
     instr.logNumClasses(numClasses)
     instr.logParams(this, labelCol, featuresCol, predictionCol, rawPredictionCol,
@@ -179,7 +183,7 @@ class DecisionTreeClassificationModel private[ml] (
     @Since("1.6.0")override val numFeatures: Int,
     @Since("1.5.0")override val numClasses: Int)
   extends ProbabilisticClassificationModel[Vector, DecisionTreeClassificationModel]
-  with DecisionTreeModel with DecisionTreeClassifierParams with MLWritable with Serializable {
+  with DecisionTreeModel with DecisionTreeClassifierParams with HasMissingnessCol with HasMissingnessRelianceCol with MLWritable with Serializable {
 
   require(rootNode != null,
     "DecisionTreeClassificationModel given null rootNode, but it requires a non-null rootNode.")
@@ -196,11 +200,18 @@ class DecisionTreeClassificationModel private[ml] (
     rootNode.predictImpl(features).prediction
   }
 
+  def computeMissingnessReliance(features: Vector, missingness: Vector): Double = {
+    rootNode.computeMissingnessRelianceImpl(features, missingness)
+  }
+
   @Since("3.0.0")
   override def transformSchema(schema: StructType): StructType = {
     var outputSchema = super.transformSchema(schema)
     if ($(leafCol).nonEmpty) {
       outputSchema = SchemaUtils.updateField(outputSchema, getLeafField($(leafCol)))
+    }
+    if ($(missingnessRelianceCol).nonEmpty) {
+      outputSchema = SchemaUtils.updateField(outputSchema, getMissingnessRelianceField($(missingnessRelianceCol)))
     }
     outputSchema
   }
@@ -209,13 +220,27 @@ class DecisionTreeClassificationModel private[ml] (
     val outputSchema = transformSchema(dataset.schema, logging = true)
 
     val outputData = super.transform(dataset)
-    if ($(leafCol).nonEmpty) {
+
+    val withLeafCol = if ($(leafCol).nonEmpty) {
       val leafUDF = udf { features: Vector => predictLeaf(features) }
       outputData.withColumn($(leafCol), leafUDF(col($(featuresCol))),
         outputSchema($(leafCol)).metadata)
     } else {
       outputData
     }
+
+    val withMissingnessCol = if ($(missingnessRelianceCol).nonEmpty && $(missingnessCol).nonEmpty) {
+      val missingnessUDF = udf { (features: Vector, missingness: Vector) =>
+        computeMissingnessReliance(features, missingness)
+      }
+      withLeafCol.withColumn($(missingnessRelianceCol),
+        missingnessUDF(col($(featuresCol)), col($(missingnessCol))),
+        outputSchema($(missingnessRelianceCol)).metadata)
+    } else {
+      withLeafCol
+    }
+
+    withMissingnessCol
   }
 
   @Since("3.0.0")

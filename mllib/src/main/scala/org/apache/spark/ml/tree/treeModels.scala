@@ -104,6 +104,15 @@ private[spark] trait DecisionTreeModel {
     leafAttr.withName(leafCol).toStructField()
   }
 
+  private[ml] lazy val missingnessRelianceAttr = {
+    NominalAttribute.defaultAttr
+      .withNumValues(2)
+  }
+
+  private[ml] def getMissingnessRelianceField(missingnessRelianceCol: String) = {
+    missingnessRelianceAttr.withName(missingnessRelianceCol).toStructField()
+  }
+
   @transient private lazy val leafIndices: Map[LeafNode, Int] = {
     leafIterator(rootNode).zipWithIndex.toMap
   }

@@ -21,7 +21,7 @@ import scala.collection.mutable
 import scala.util.Try
 
 import org.apache.spark.internal.Logging
-import org.apache.spark.ml.feature.Instance
+import org.apache.spark.ml.feature.MissingnessInstance
 import org.apache.spark.ml.tree.TreeEnsembleParams
 import org.apache.spark.mllib.tree.configuration.Algo._
 import org.apache.spark.mllib.tree.configuration.QuantileStrategy._
@@ -58,7 +58,8 @@ private[spark] class DecisionTreeMetadata(
     val minWeightFractionPerNode: Double,
     val minInfoGain: Double,
     val numTrees: Int,
-    val numFeaturesPerNode: Int) extends Serializable {
+    val numFeaturesPerNode: Int,
+    val alpha: Double) extends Serializable {
 
   def isUnordered(featureIndex: Int): Boolean = unorderedFeatures.contains(featureIndex)
 
@@ -111,7 +112,7 @@ private[spark] object DecisionTreeMetadata extends Logging {
    * as well as the number of splits and bins for each feature.
    */
   def buildMetadata(
-      input: RDD[Instance],
+      input: RDD[MissingnessInstance],
       strategy: Strategy,
       numTrees: Int,
       featureSubsetStrategy: String): DecisionTreeMetadata = {
@@ -221,14 +222,14 @@ private[spark] object DecisionTreeMetadata extends Logging {
       numBins.max, strategy.categoricalFeaturesInfo, unorderedFeatures.toSet, numBins,
       strategy.impurity, strategy.quantileCalculationStrategy, strategy.maxDepth,
       strategy.minInstancesPerNode, strategy.minWeightFractionPerNode, strategy.minInfoGain,
-      numTrees, numFeaturesPerNode)
+      numTrees, numFeaturesPerNode, strategy.alpha)
   }
 
   /**
    * Version of [[DecisionTreeMetadata#buildMetadata]] for DecisionTree.
    */
   def buildMetadata(
-      input: RDD[Instance],
+      input: RDD[MissingnessInstance],
       strategy: Strategy): DecisionTreeMetadata = {
     buildMetadata(input, strategy, numTrees = 1, featureSubsetStrategy = "all")
   }

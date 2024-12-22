@@ -21,7 +21,7 @@ import org.json4s.{DefaultFormats, JObject}
 import org.json4s.JsonDSL._
 
 import org.apache.spark.annotation.Since
-import org.apache.spark.ml.feature.Instance
+import org.apache.spark.ml.feature.MissingnessInstance
 import org.apache.spark.ml.linalg.Vector
 import org.apache.spark.ml.param.ParamMap
 import org.apache.spark.ml.tree._
@@ -141,7 +141,7 @@ class RandomForestRegressor @Since("1.4.0") (@Since("1.4.0") override val uid: S
       checkRegressionLabels($(labelCol)),
       checkNonNegativeWeights(get(weightCol)),
       checkNonNanVectors($(featuresCol))
-    ).rdd.map { case Row(l: Double, w: Double, v: Vector) => Instance(l, w, v)
+    ).rdd.map { case Row(l: Double, w: Double, v: Vector) => MissingnessInstance(l, w, v)
     }.setName("training instances")
 
     val strategy =

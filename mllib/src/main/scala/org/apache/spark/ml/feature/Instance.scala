@@ -31,6 +31,22 @@ import org.apache.spark.rdd.RDD
  */
 private[spark] case class Instance(label: Double, weight: Double, features: Vector)
 
+/**
+ * Class that represents an instance of weighted data point with label, features, and missingness indicators.
+ *
+ * @param label Label for this data point.
+ * @param weight The weight of this instance.
+ * @param features The vector of features for this data point.
+ * @param missingness The vector of missingness indicators for this data point.
+ */
+private[spark] case class MissingnessInstance(label: Double, weight: Double, features: Vector, missingness: Vector)
+
+private[spark] object MissingnessInstance {
+  def apply(label: Double, weight: Double, features: Vector, missingness: Option[Vector] = None): MissingnessInstance = {
+    val missingnessVectors = missingness.getOrElse(Vectors.zeros(features.size))
+    MissingnessInstance(label, weight, features, missingnessVectors)
+  }
+}
 
 /**
  * Class that represents an block of instance.

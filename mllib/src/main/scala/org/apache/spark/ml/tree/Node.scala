@@ -45,6 +45,8 @@ sealed abstract class Node extends Serializable {
   /** Recursive prediction helper method */
   private[ml] def predictImpl(features: Vector): LeafNode
 
+  private[ml] def computeMissingnessRelianceImpl(features: Vector, missingness: Vector): Double
+
   /** Recursive prediction helper method */
   private[ml] def predictBinned(binned: Array[Int], splits: Array[Array[Split]]): LeafNode
 
@@ -120,6 +122,10 @@ class LeafNode private[ml] (
   override def toString: String =
     s"LeafNode(prediction = $prediction, impurity = $impurity)"
 
+  override private[ml] def computeMissingnessRelianceImpl(features: Vector, missingness: Vector): Double = {
+    0.0
+  }
+
   override private[ml] def predictImpl(features: Vector): LeafNode = this
 
   override private[ml] def predictBinned(
@@ -171,6 +177,23 @@ class InternalNode private[ml] (
 
   override def toString: String = {
     s"InternalNode(prediction = $prediction, impurity = $impurity, split = $split)"
+  }
+
+  override private[ml] def computeMissingnessRelianceImpl(features: Vector, missingness: Vector): Double = {
+    var node: Node = this
+    while (node.isInstanceOf[InternalNode]) {
+      val n = node.asInstanceOf[InternalNode]
+      val featureIndex = n.split.featureIndex
+      if (missingness(featureIndex) == 1.0) {
+        return 1.0
+      }
+      if (n.split.shouldGoLeft(features)) {
+        node = n.leftChild
+      } else {
+        node = n.rightChild
+      }
+    }
+    0.0
   }
 
   override private[ml] def predictImpl(features: Vector): LeafNode = {

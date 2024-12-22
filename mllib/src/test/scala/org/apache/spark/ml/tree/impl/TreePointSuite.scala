@@ -20,6 +20,7 @@ package org.apache.spark.ml.tree.impl
 import org.apache.spark.{SparkConf, SparkFunSuite}
 import org.apache.spark.internal.config.Kryo._
 import org.apache.spark.serializer.KryoSerializer
+import org.apache.spark.ml.linalg.Vectors
 
 class TreePointSuite extends SparkFunSuite {
   test("Kryo class register") {
@@ -28,7 +29,7 @@ class TreePointSuite extends SparkFunSuite {
 
     val ser = new KryoSerializer(conf).newInstance()
 
-    val point = new TreePoint(1.0, Array(1, 2, 3), 1.0)
+    val point = new TreePoint(1.0, Array(1, 2, 3), 1.0, Vectors.dense(0.0, 0.0, 0.0))
     val point2 = ser.deserialize[TreePoint](ser.serialize(point))
     assert(point.label === point2.label)
     assert(point.binnedFeatures === point2.binnedFeatures)

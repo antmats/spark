@@ -19,7 +19,7 @@ package org.apache.spark.ml.tree.impl
 
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.internal.Logging
-import org.apache.spark.ml.feature.Instance
+import org.apache.spark.ml.feature.MissingnessInstance
 import org.apache.spark.ml.linalg.Vector
 import org.apache.spark.ml.regression.DecisionTreeRegressionModel
 import org.apache.spark.ml.tree._
@@ -37,13 +37,13 @@ private[spark] object GradientBoostedTrees extends Logging {
 
   /**
    * Method to train a gradient boosting model
-   * @param input Training dataset: RDD of `Instance`.
+   * @param input Training dataset: RDD of `MissingnessInstance`.
    * @param seed Random seed.
    * @return tuple of ensemble models and weights:
    *         (array of decision tree models, array of model weights)
    */
   def run(
-      input: RDD[Instance],
+      input: RDD[MissingnessInstance],
       boostingStrategy: OldBoostingStrategy,
       seed: Long,
       featureSubsetStrategy: String,
@@ -56,7 +56,7 @@ private[spark] object GradientBoostedTrees extends Logging {
           seed, featureSubsetStrategy, instr)
       case OldAlgo.Classification =>
         // Map labels to -1, +1 so binary classification can be treated as regression.
-        val remappedInput = input.map(x => Instance((x.label * 2) - 1, x.weight, x.features))
+        val remappedInput = input.map(x => MissingnessInstance((x.label * 2) - 1, x.weight, x.features, x.missingness))
         GradientBoostedTrees.boost(remappedInput, remappedInput, boostingStrategy, validate = false,
           seed, featureSubsetStrategy, instr)
       case _ =>
@@ -66,7 +66,7 @@ private[spark] object GradientBoostedTrees extends Logging {
 
   /**
    * Method to validate a gradient boosting model
-   * @param input Training dataset: RDD of `Instance`.
+   * @param input Training dataset: RDD of `MissingnessInstance`.
    * @param validationInput Validation dataset.
    *                        This dataset should be different from the training dataset,
    *                        but it should follow the same distribution.
@@ -77,8 +77,8 @@ private[spark] object GradientBoostedTrees extends Logging {
    *         (array of decision tree models, array of model weights)
    */
   def runWithValidation(
-      input: RDD[Instance],
-      validationInput: RDD[Instance],
+      input: RDD[MissingnessInstance],
+      validationInput: RDD[MissingnessInstance],
       boostingStrategy: OldBoostingStrategy,
       seed: Long,
       featureSubsetStrategy: String,
@@ -92,9 +92,9 @@ private[spark] object GradientBoostedTrees extends Logging {
       case OldAlgo.Classification =>
         // Map labels to -1, +1 so binary classification can be treated as regression.
         val remappedInput = input.map(
-          x => Instance((x.label * 2) - 1, x.weight, x.features))
+          x => MissingnessInstance((x.label * 2) - 1, x.weight, x.features, x.missingness))
         val remappedValidationInput = validationInput.map(
-          x => Instance((x.label * 2) - 1, x.weight, x.features))
+          x => MissingnessInstance((x.label * 2) - 1, x.weight, x.features, x.missingness))
         GradientBoostedTrees.boost(remappedInput, remappedValidationInput, boostingStrategy,
           validate = true, seed, featureSubsetStrategy, instr)
       case _ =>
@@ -190,18 +190,18 @@ private[spark] object GradientBoostedTrees extends Logging {
    * Method to calculate error of the base learner for the gradient boosting calculation.
    * Note: This method is not used by the gradient boosting algorithm but is useful for debugging
    * purposes.
-   * @param data Training dataset: RDD of `Instance`.
+   * @param data Training dataset: RDD of `MissingnessInstance`.
    * @param trees Boosted Decision Tree models
    * @param treeWeights Learning rates at each boosting iteration.
    * @param loss evaluation metric.
    * @return Measure of model error on data
    */
   def computeWeightedError(
-      data: RDD[Instance],
+      data: RDD[MissingnessInstance],
       trees: Array[DecisionTreeRegressionModel],
       treeWeights: Array[Double],
       loss: OldLoss): Double = {
-    val (errSum, weightSum) = data.map { case Instance(label, weight, features) =>
+    val (errSum, weightSum) = data.map { case MissingnessInstance(label, weight, features, missingness) =>
       val predicted = trees.zip(treeWeights).foldLeft(0.0) { case (acc, (model, weight)) =>
         updatePrediction(features, acc, model, weight)
       }
@@ -233,7 +233,7 @@ private[spark] object GradientBoostedTrees extends Logging {
   /**
    * Method to compute error or loss for every iteration of gradient boosting.
    *
-   * @param data RDD of `Instance`
+   * @param data RDD of `MissingnessInstance`
    * @param trees Boosted Decision Tree models
    * @param treeWeights Learning rates at each boosting iteration.
    * @param loss evaluation metric.
@@ -242,20 +242,20 @@ private[spark] object GradientBoostedTrees extends Logging {
    *         containing the first i+1 trees
    */
   def evaluateEachIteration(
-      data: RDD[Instance],
+      data: RDD[MissingnessInstance],
       trees: Array[DecisionTreeRegressionModel],
       treeWeights: Array[Double],
       loss: OldLoss,
       algo: OldAlgo.Value): Array[Double] = {
     val remappedData = algo match {
       case OldAlgo.Classification =>
-        data.map(x => Instance((x.label * 2) - 1, x.weight, x.features))
+        data.map(x => MissingnessInstance((x.label * 2) - 1, x.weight, x.features, x.missingness))
       case _ => data
     }
 
     val numTrees = trees.length
     val (errSum, weightSum) = remappedData.mapPartitions { iter =>
-      iter.map { case Instance(label, weight, features) =>
+      iter.map { case MissingnessInstance(label, weight, features, missingness) =>
         val pred = Array.tabulate(numTrees) { i =>
           trees(i).rootNode.predictImpl(features)
             .prediction * treeWeights(i)
@@ -283,8 +283,8 @@ private[spark] object GradientBoostedTrees extends Logging {
    *         (array of decision tree models, array of model weights)
    */
   def boost(
-      input: RDD[Instance],
-      validationInput: RDD[Instance],
+      input: RDD[MissingnessInstance],
+      validationInput: RDD[MissingnessInstance],
       boostingStrategy: OldBoostingStrategy,
       validate: Boolean,
       seed: Long,
@@ -327,7 +327,7 @@ private[spark] object GradientBoostedTrees extends Logging {
 
     // Initialize tree
     timer.start("building tree 0")
-    val retaggedInput = input.retag(classOf[Instance])
+    val retaggedInput = input.retag(classOf[MissingnessInstance])
     timer.start("buildMetadata")
     val metadata = DecisionTreeMetadata.buildMetadata(retaggedInput, treeStrategy,
       numTrees = 1, featureSubsetStrategy)
@@ -388,7 +388,7 @@ private[spark] object GradientBoostedTrees extends Logging {
     if (validate) {
       timer.start("init validation")
       validationTreePoints = TreePoint.convertToTreeRDD(
-        validationInput.retag(classOf[Instance]), splits, metadata)
+        validationInput.retag(classOf[MissingnessInstance]), splits, metadata)
         .persist(StorageLevel.MEMORY_AND_DISK)
       validatePredError = computeInitialPredictionAndError(
         validationTreePoints, firstTreeWeight, firstTreeModel, loss, bcSplits)
@@ -425,7 +425,7 @@ private[spark] object GradientBoostedTrees extends Logging {
 
       val bagged = treePoints.zip(labelWithCounts)
         .map { case (treePoint, (newLabel, count)) =>
-          val newTreePoint = new TreePoint(newLabel, treePoint.binnedFeatures, treePoint.weight)
+          val newTreePoint = new TreePoint(newLabel, treePoint.binnedFeatures, treePoint.weight, treePoint.missingness)
           // according to current design, treePoint.weight == baggedPoint.sampleWeight
           new BaggedPoint[TreePoint](newTreePoint, Array(count), treePoint.weight)
         }

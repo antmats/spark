@@ -21,9 +21,10 @@ import org.apache.spark.SparkException
 import org.apache.spark.internal.Logging
 import org.apache.spark.ml.PredictorParams
 import org.apache.spark.ml.classification.ClassifierParams
-import org.apache.spark.ml.feature.Instance
+import org.apache.spark.ml.feature.MissingnessInstance
 import org.apache.spark.ml.linalg._
 import org.apache.spark.ml.param.shared.HasWeightCol
+import org.apache.spark.ml.tree.HasMissingnessCol
 import org.apache.spark.mllib.linalg.{Vector => OldVector, Vectors => OldVectors}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql._
@@ -102,10 +103,46 @@ private[spark] object DatasetUtils extends Logging {
     }
   }
 
+  private[ml] def checkBinaryVectors(vectorCol: Column): Column = {
+    when(vectorCol.isNull, raise_error(lit("Vectors MUST NOT be Null")))
+      .when(!validateBinaryVector(vectorCol),
+        raise_error(concat(lit("Vector values MUST be 0 or 1, but got "),
+          vectorCol.cast(StringType))))
+      .otherwise(vectorCol)
+  }
+
+  private lazy val validateBinaryVector = udf { vector: Vector =>
+    vector match {
+      case dv: DenseVector =>
+        dv.values.forall(v => v == 0.0 || v == 1.0)
+      case sv: SparseVector =>
+        sv.values.forall(v => v == 0.0 || v == 1.0)
+    }
+  }
+
+  private[ml] def checkMissingnessVectors(missingnessCol: String, numFeatures: Int): Column = {
+    val missingnessVectors = col(missingnessCol)
+    when(missingnessVectors.isNull, raise_error(lit("Vectors of missingness indicators MUST NOT be Null")))
+      .when(vectorSize(missingnessVectors) =!= lit(numFeatures),
+        raise_error(lit("Vectors of missingness indicators MUST be of length `numFeatures`")))
+      .otherwise(checkBinaryVectors(missingnessVectors))
+  }
+
+  private[ml] def checkMissingnessVectors(missingnessCol: Option[String], numFeatures: Int): Column = missingnessCol match {
+    case Some(m) if m.nonEmpty => checkMissingnessVectors(m, numFeatures)
+    // TODO: Check that this does not cause problems for non-MA trees.
+    case _ => lit(Vectors.zeros(numFeatures))
+  }
+
+  private lazy val vectorSize = udf { vector: Vector =>
+    // Both DenseVector and SparseVector implement a `size` method.
+    vector.size
+  }
+
   private[ml] def extractInstances(
       p: PredictorParams,
       df: Dataset[_],
-      numClasses: Option[Int] = None): RDD[Instance] = {
+      numClasses: Option[Int] = None): RDD[MissingnessInstance] = {
     val labelCol = p match {
       case c: ClassifierParams =>
         checkClassificationLabels(c.getLabelCol, numClasses)
@@ -118,8 +155,14 @@ private[spark] object DatasetUtils extends Logging {
       case _ => lit(1.0)
     }
 
-    df.select(labelCol, weightCol, checkNonNanVectors(p.getFeaturesCol))
-      .rdd.map { case Row(l: Double, w: Double, v: Vector) => Instance(l, w, v) }
+    val numFeatures = getNumFeatures(df, p.getFeaturesCol)
+    val missingnessCol = p match {
+      case m: HasMissingnessCol => checkMissingnessVectors(m.get(m.missingnessCol), numFeatures)
+      case _ => lit(Vectors.zeros(numFeatures))
+    }
+
+    df.select(labelCol, weightCol, checkNonNanVectors(p.getFeaturesCol), missingnessCol)
+      .rdd.map { case Row(l: Double, w: Double, v: Vector, m: Vector) => MissingnessInstance(l, w, v, m) }
   }
 
   /**

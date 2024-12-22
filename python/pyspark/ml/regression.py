@@ -53,6 +53,9 @@ from pyspark.ml.tree import (
     _RandomForestParams,
     _GBTParams,
     _TreeRegressorParams,
+    HasMissingnessCol,
+    HasAlpha,
+    HasMissingnessRelianceCol,
 )
 from pyspark.ml.base import Transformer
 from pyspark.ml.linalg import Vector, Matrix
@@ -1037,6 +1040,9 @@ class _DecisionTreeRegressorParams(_DecisionTreeParams, _TreeRegressorParams, Ha
 class DecisionTreeRegressor(
     _JavaRegressor["DecisionTreeRegressionModel"],
     _DecisionTreeRegressorParams,
+    HasMissingnessCol,
+    HasAlpha,
+    HasMissingnessRelianceCol,
     JavaMLWritable,
     JavaMLReadable["DecisionTreeRegressor"],
 ):
@@ -1130,13 +1136,17 @@ class DecisionTreeRegressor(
         weightCol: Optional[str] = None,
         leafCol: str = "",
         minWeightFractionPerNode: float = 0.0,
+        missingnessCol: Optional[str] = None,
+        alpha: float = 0.0,
+        missingnessRelianceCol: Optional[str] = None,
     ):
         """
         __init__(self, \\*, featuresCol="features", labelCol="label", predictionCol="prediction", \
                  maxDepth=5, maxBins=32, minInstancesPerNode=1, minInfoGain=0.0, \
                  maxMemoryInMB=256, cacheNodeIds=False, checkpointInterval=10, \
                  impurity="variance", seed=None, varianceCol=None, weightCol=None, \
-                 leafCol="", minWeightFractionPerNode=0.0)
+                 leafCol="", minWeightFractionPerNode=0.0, missingnessCol=None, \
+                 alpha=0.0, missingnessRelianceCol=None)
         """
         super(DecisionTreeRegressor, self).__init__()
         self._java_obj = self._new_java_obj(
@@ -1166,13 +1176,17 @@ class DecisionTreeRegressor(
         weightCol: Optional[str] = None,
         leafCol: str = "",
         minWeightFractionPerNode: float = 0.0,
+        missingnessCol: Optional[str] = None,
+        alpha: float = 0.0,
+        missingnessRelianceCol: Optional[str] = None,
     ) -> "DecisionTreeRegressor":
         """
         setParams(self, \\*, featuresCol="features", labelCol="label", predictionCol="prediction", \
                   maxDepth=5, maxBins=32, minInstancesPerNode=1, minInfoGain=0.0, \
                   maxMemoryInMB=256, cacheNodeIds=False, checkpointInterval=10, \
                   impurity="variance", seed=None, varianceCol=None, weightCol=None, \
-                  leafCol="", minWeightFractionPerNode=0.0)
+                  leafCol="", minWeightFractionPerNode=0.0, missingnessCol=None, \
+                  alpha=0.0, missingnessRelianceCol=None)
         Sets params for the DecisionTreeRegressor.
         """
         kwargs = self._input_kwargs
@@ -1270,6 +1284,8 @@ class DecisionTreeRegressionModel(
     _JavaRegressionModel,
     _DecisionTreeModel,
     _DecisionTreeRegressorParams,
+    HasMissingnessCol,
+    HasMissingnessRelianceCol,
     JavaMLWritable,
     JavaMLReadable["DecisionTreeRegressionModel"],
 ):
